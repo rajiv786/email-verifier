@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "lib-email-validator": "^1.0.3"
+  }
+}
