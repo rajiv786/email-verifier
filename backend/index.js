@@ -69,6 +69,7 @@ app.post('/validate-emails', async (req, res) => {
   try {
     // Perform batch validation
     const validationResults = await validateEmailsInBatches(emailsToValidate);
+    console.log(validationResults);
     res.json(validationResults);
   } catch (error) {
     // Return error if something went wrong during validation
