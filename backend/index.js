@@ -1,51 +1,3 @@
-// // import { validate } from 'deep-email-validator';
-// const { validate } = require('deep-email-validator');
-
-// const main = async () => {
-//   // Validate a single email
-//   const emailToValidate = 'Admin@slushie.in';
-//   let res = await validate(emailToValidate);
-//   console.log(`Validation result for ${emailToValidate}:`, res);
-
-//   // Validate with additional options
-// //   const detailedValidation = await validate({
-// //     email: 'name@example.org',
-// //     sender: 'name@example.org',
-// //     validateRegex: true,
-// //     validateMx: true,
-// //     validateTypo: true,
-// //     validateDisposable: true,
-// //     validateSMTP: true,
-// //   });
-
-// //   console.log(`Detailed validation result:`, detailedValidation);
-// };
-
-// main().catch((error) => {
-//   console.error('Error validating email:', error);
-// });
-// const { validate } = require('deep-email-validator');
-
-// const emailsToValidate = [
-//   'rajiv@hubhawks.com','kamin@h.in','arya@slushie.in','admin@slushie.in'
-//   // Add more emails as needed
-// ];
-
-// const main = async () => {
-//   // Iterate over each email and validate
-//   for (const email of emailsToValidate) {
-//     try {
-//       const result = await validate(email);
-//       console.log(`Validation result for ${email}:`, result);
-//     } catch (error) {
-//       console.error(`Error validating email ${email}:`, error);
-//     }
-//   }
-// };
-
-// main().catch((error) => {
-//   console.error('Error in main execution:', error);
-// });
 const express = require('express');
 const { validate } = require('deep-email-validator');
 const cors = require('cors');
@@ -57,33 +9,73 @@ const PORT = process.env.PORT || 5000;
 app.use(express.json());
 app.use(cors());
 
+// Helper function to validate an email with timeout
+const validateWithTimeout = (email, timeout = 5000) => {
+  return Promise.race([
+    validate(email),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Timeout exceeded")), timeout)
+    ),
+  ]);
+};
+
+// Helper function to retry failed requests
+const validateWithRetries = async (email, retries = 3, delay = 1000) => {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await validateWithTimeout(email);
+    } catch (error) {
+      if (attempt === retries) throw error;
+      // Wait before retrying
+      await new Promise((res) => setTimeout(res, delay));
+    }
+  }
+};
+
+// Helper function to validate emails in batches
+const validateEmailsInBatches = async (emails, batchSize = 10) => {
+  const results = [];
+
+  for (let i = 0; i < emails.length; i += batchSize) {
+    const batch = emails.slice(i, i + batchSize);
+
+    // Validate each batch of emails
+    const batchResults = await Promise.all(
+      batch.map(async (email) => {
+        try {
+          const result = await validateWithRetries(email);
+          return { email, result };
+        } catch (error) {
+          return { email, error: error.message };
+        }
+      })
+    );
+
+    results.push(...batchResults);
+  }
+
+  return results;
+};
+
 // Endpoint to validate emails
 app.post('/validate-emails', async (req, res) => {
   const emailsToValidate = req.body.emails; // Expecting an array of emails
 
+  // Check if emails are provided and are in the correct format
   if (!Array.isArray(emailsToValidate)) {
     return res.status(400).json({ error: 'Emails must be an array' });
   }
 
-  // Create an array of promises for email validation
-  const validationPromises = emailsToValidate.map(async (email) => {
-    try {
-		const result = await validate(email);
-		// console.log(result)
-      return { email, result };
-    } catch (error) {
-      return { email, error: error.message };
-    }
-  });
-
-  // Wait for all validations to complete
-  const validationResults = await Promise.all(validationPromises);
-//   console.log(validationResults)
-  // Send the validation results back to the client
-  res.json(validationResults);
+  try {
+    // Perform batch validation
+    const validationResults = await validateEmailsInBatches(emailsToValidate);
+    res.json(validationResults);
+  } catch (error) {
+    // Return error if something went wrong during validation
+    res.status(500).json({ error: 'Error validating emails', details: error.message });
+  }
 });
 
-  
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
